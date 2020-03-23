@@ -34,7 +34,7 @@ public final class Coin implements Monetary, Comparable<Coin>, Serializable {
      * Number of decimals for one Bitcoin. This constant is useful for quick adapting to other coins because a lot of
      * constants derive from it.
      */
-    public static final int SMALLEST_UNIT_EXPONENT = 8;
+    public static final int SMALLEST_UNIT_EXPONENT = 7;
 
     /**
      * The number of satoshis equal to one bitcoin.

@@ -17,37 +17,34 @@
 
 package org.bitcoinj.core;
 
-import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
-import org.bitcoinj.crypto.TransactionSignature;
-import org.bitcoinj.script.Script;
-import org.bitcoinj.script.Script.ScriptType;
-import org.bitcoinj.script.ScriptBuilder;
-import org.bitcoinj.script.ScriptError;
-import org.bitcoinj.script.ScriptException;
-import org.bitcoinj.script.ScriptOpCodes;
-import org.bitcoinj.script.ScriptPattern;
-import org.bitcoinj.signers.TransactionSigner;
-import org.bitcoinj.utils.ExchangeRate;
-import org.bitcoinj.wallet.Wallet;
-import org.bitcoinj.wallet.WalletTransaction.Pool;
-
 import com.google.common.base.MoreObjects;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Lists;
 import com.google.common.primitives.Ints;
 import com.google.common.primitives.Longs;
+import org.bitcoinj.core.TransactionConfidence.ConfidenceType;
+import org.bitcoinj.crypto.TransactionSignature;
+import org.bitcoinj.script.*;
+import org.bitcoinj.script.Script.ScriptType;
+import org.bitcoinj.signers.TransactionSigner;
+import org.bitcoinj.utils.ExchangeRate;
+import org.bitcoinj.wallet.Wallet;
+import org.bitcoinj.wallet.WalletTransaction.Pool;
+import org.bouncycastle.crypto.params.KeyParameter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.bouncycastle.crypto.params.KeyParameter;
 
 import javax.annotation.Nullable;
-import java.io.*;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.math.BigInteger;
 import java.util.*;
 
-import static org.bitcoinj.core.Utils.*;
 import static com.google.common.base.Preconditions.checkArgument;
 import static com.google.common.base.Preconditions.checkState;
-import java.math.BigInteger;
+import static org.bitcoinj.core.Utils.uint32ToByteStreamLE;
+import static org.bitcoinj.core.Utils.uint64ToByteStreamLE;
 
 /**
  * <p>A transaction represents the movement of coins from some addresses to some other addresses. It can also represent
@@ -125,6 +122,8 @@ public class Transaction extends ChildMessage {
 
     // These are bitcoin serialized.
     private long version;
+    @Nullable
+    private Sha256Hash presentBlockHash;
     private ArrayList<TransactionInput> inputs;
     private ArrayList<TransactionOutput> outputs;
 
@@ -207,6 +206,14 @@ public class Transaction extends ChildMessage {
         length = 8; // 8 for std fields
     }
 
+    public Transaction(NetworkParameters params, boolean isBCD) {
+        this(params);
+        if (isBCD) {
+            version = 12;
+            presentBlockHash = Sha256Hash.wrap("8d4548bc1faaa96beb2885b4836402ab1755abe24783808d626b018c13dff3d8");
+        }
+    }
+
     /**
      * Creates a transaction from the given serialized bytes, eg, from a block or a tx network message.
      */
@@ -252,6 +259,15 @@ public class Transaction extends ChildMessage {
     public Transaction(NetworkParameters params, byte[] payload, @Nullable Message parent, MessageSerializer setSerializer, int length)
             throws ProtocolException {
         super(params, payload, 0, parent, setSerializer, length);
+    }
+
+    @Nullable
+    public Sha256Hash getPresentBlockHash() {
+        return presentBlockHash;
+    }
+
+    public void setPresentBlockHash(@Nullable Sha256Hash presentBlockHash) {
+        this.presentBlockHash = presentBlockHash;
     }
 
     /** @deprecated use {@link #getTxId()} */
@@ -560,8 +576,14 @@ public class Transaction extends ChildMessage {
 
     protected static int calcLength(byte[] buf, int offset) {
         VarInt varint;
+        long version = Utils.readUint32(buf, offset);
         // jump past version (uint32)
         int cursor = offset + 4;
+
+        // 32 byte present block hash
+        if (version == 12) {
+            cursor += 32;
+        }
 
         int i;
         long scriptLen;
@@ -606,6 +628,11 @@ public class Transaction extends ChildMessage {
 
         // version
         version = readUint32();
+
+        // 32 byte present block hash
+        if (version == 12) {
+            presentBlockHash = readHash();
+        }
         // peek at marker
         byte marker = payload[cursor];
         boolean useSegwit = marker == 0;
@@ -749,6 +776,8 @@ public class Transaction extends ChildMessage {
             s.append(indent).append("updated: ").append(Utils.dateTimeFormat(updatedAt)).append('\n');
         if (version != 1)
             s.append(indent).append("version ").append(version).append('\n');
+        if (version == 12)
+            s.append(indent).append("present block hash ").append(presentBlockHash.toString()).append('\n');
         if (isTimeLocked()) {
             s.append(indent).append("time locked until ");
             if (lockTime < LOCKTIME_THRESHOLD) {
@@ -1372,6 +1401,7 @@ public class Transaction extends ChildMessage {
                 hashOutputs = Sha256Hash.hashTwice(bosHashOutputs.toByteArray());
             }
             uint32ToByteStreamLE(version, bos);
+            bos.write(presentBlockHash.getReversedBytes());
             bos.write(hashPrevouts);
             bos.write(hashSequence);
             bos.write(inputs.get(inputIndex).getOutpoint().getHash().getReversedBytes());
@@ -1404,6 +1434,9 @@ public class Transaction extends ChildMessage {
     protected void bitcoinSerializeToStream(OutputStream stream, boolean useSegwit) throws IOException {
         // version
         uint32ToByteStreamLE(version, stream);
+        // present block hash
+        if (version == 12)
+            stream.write(presentBlockHash.getReversedBytes());
         // marker, flag
         if (useSegwit) {
             stream.write(0);
