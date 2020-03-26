@@ -197,18 +197,25 @@ public class Transaction extends ChildMessage {
     @Nullable
     private String memo;
 
+    /**
+     * Create normal transaction
+     */
     public Transaction(NetworkParameters params) {
+        this(params, false);
+    }
+
+    /**
+     * Create coinbase transaction
+     */
+    public Transaction(NetworkParameters params, boolean isCoinBase) {
         super(params);
         version = 1;
         inputs = new ArrayList<>();
         outputs = new ArrayList<>();
         // We don't initialize appearsIn deliberately as it's only useful for transactions stored in the wallet.
         length = 8; // 8 for std fields
-    }
 
-    public Transaction(NetworkParameters params, boolean isBCD) {
-        this(params);
-        if (isBCD) {
+        if (!isCoinBase) {
             version = 12;
             presentBlockHash = Sha256Hash.wrap("8d4548bc1faaa96beb2885b4836402ab1755abe24783808d626b018c13dff3d8");
         }
